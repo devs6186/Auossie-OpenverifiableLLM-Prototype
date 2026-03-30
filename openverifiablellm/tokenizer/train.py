@@ -3,9 +3,8 @@ import logging
 from pathlib import Path
 from typing import Union
 
-from openverifiablellm.utils import compute_sha256
-
 from .factory import create_tokenizer
+from .verify import compute_tokenizer_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -63,32 +62,44 @@ def train_tokenizer(
     return save_path
 
 
-def hash_tokenizer_config(tokenizer_path: Union[str, Path]) -> dict:
+def hash_tokenizer_config(tokenizer_path: Union[str, Path], tokenizer_type: str = "bpe") -> dict:
     """
-    Compute SHA256 hashes of tokenizer configuration files.
+    Compute SHA256 hashes of tokenizer configuration files with backend identity.
     """
 
     tokenizer_path = Path(tokenizer_path)
-
-    vocab_path = tokenizer_path / "vocab.json"
-    merges_path = tokenizer_path / "merges.txt"
-
+    tokenizer = create_tokenizer(
+        tokenizer_type=tokenizer_type,
+        vocab_size=TOKENIZER_VOCAB_SIZE,
+        min_frequency=TOKENIZER_MIN_FREQUENCY,
+    )
+    manifest = compute_tokenizer_manifest(tokenizer, tokenizer_path)
+    artifacts = manifest["artifacts"]
+    backend = manifest["backend_metadata"]["backend"]
+    vocab_path = tokenizer.get_vocab_path(tokenizer_path)
     if not vocab_path.is_file():
-        raise FileNotFoundError(f"vocab.json not found at {vocab_path}")
+        raise FileNotFoundError(f"vocab artifact not found at {vocab_path}")
 
-    if not merges_path.is_file():
-        raise FileNotFoundError(f"merges.txt not found at {merges_path}")
-
-    vocab_bytes = vocab_path.read_bytes()
-    vocab_hash = compute_sha256(data=vocab_bytes)
-    actual_vocab_size = len(json.loads(vocab_bytes.decode("utf-8")))
-
-    merges_hash = compute_sha256(file_path=merges_path)
+    if backend == "bpe":
+        actual_vocab_size = len(json.loads(vocab_path.read_text(encoding="utf-8")))
+    else:
+        # SentencePiece vocab is a TSV-like text artifact, not JSON.
+        actual_vocab_size = sum(
+            1 for line in vocab_path.read_text(encoding="utf-8").splitlines() if line
+        )
 
     logger.info("Tokenizer config hashed successfully")
 
-    return {
-        "tokenizer_vocab_hash": vocab_hash,
-        "tokenizer_merges_hash": merges_hash,
+    response = {
+        "tokenizer_backend": manifest["backend_metadata"]["backend"],
+        "tokenizer_manifest_hash": manifest["tokenizer_manifest_hash"],
+        "tokenizer_vocab_hash": artifacts.get("vocab", ""),
         "tokenizer_vocab_size": actual_vocab_size,
+        "tokenizer_artifact_hashes": artifacts,
+        "tokenizer_backend_metadata": manifest["backend_metadata"],
     }
+    if "merges" in artifacts:
+        response["tokenizer_merges_hash"] = artifacts["merges"]
+    if "model" in artifacts:
+        response["tokenizer_model_hash"] = artifacts["model"]
+    return response

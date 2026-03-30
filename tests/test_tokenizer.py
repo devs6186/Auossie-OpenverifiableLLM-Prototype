@@ -3,62 +3,65 @@ import json
 import pytest
 
 from openverifiablellm.tokenizer import (
+    compute_tokenizer_manifest,
     hash_tokenizer_config,
     train_tokenizer,
+    verify_backend_hash_parity,
+    verify_deterministic_contract,
 )
+from openverifiablellm.tokenizer.factory import create_tokenizer
+
+SAMPLE_TEXT = "OpenVerifiableLLM requires deterministic tokenization.\n" * 500
 
 
 @pytest.fixture
 def sample_text_file(tmp_path):
-    """Create a small sample text file for testing."""
     text_file = tmp_path / "sample.txt"
-    text_file.write_text(
-        (
-            "Wikipedia is a free online encyclopedia.\n"
-            "It is written collaboratively by volunteers.\n"
-            "Anyone can edit Wikipedia articles.\n"
-            "Wikipedia was launched on January 15 2001.\n"
-            "It is one of the most popular websites in the world.\n"
-        )
-        * 100,
-        encoding="utf-8",
-    )
+    text_file.write_text(SAMPLE_TEXT, encoding="utf-8")
     return text_file
 
 
 @pytest.fixture
-def trained_tokenizer(tmp_path, sample_text_file):
-    """Train a tokenizer on sample text and return the path."""
-    tokenizer_path = tmp_path / "tokenizer"
-
+def trained_bpe_tokenizer(tmp_path, sample_text_file):
+    tokenizer_path = tmp_path / "tokenizer_bpe"
     train_tokenizer(
         text_file=sample_text_file,
         save_path=tokenizer_path,
-        vocab_size=1000,
+        tokenizer_type="bpe",
+        vocab_size=300,
         min_frequency=2,
     )
-
     return tokenizer_path
 
 
-# ---------------------------------------------------------------------
-# Positive Tests
-# ---------------------------------------------------------------------
+@pytest.fixture
+def trained_sentencepiece_tokenizer(tmp_path, sample_text_file):
+    tokenizer_path = tmp_path / "tokenizer_spm"
+    train_tokenizer(
+        text_file=sample_text_file,
+        save_path=tokenizer_path,
+        tokenizer_type="sentencepiece",
+        vocab_size=128,
+        min_frequency=2,
+    )
+    return tokenizer_path
 
 
-def test_train_tokenizer_creates_files(trained_tokenizer):
-    """Training should create vocab.json and merges.txt."""
-    assert (trained_tokenizer / "vocab.json").is_file()
-    assert (trained_tokenizer / "merges.txt").is_file()
+def test_train_tokenizer_creates_bpe_files(trained_bpe_tokenizer):
+    assert (trained_bpe_tokenizer / "vocab.json").is_file()
+    assert (trained_bpe_tokenizer / "merges.txt").is_file()
 
 
-def test_train_tokenizer_is_deterministic(tmp_path, sample_text_file):
-    """Training twice on same input should produce identical files."""
+def test_train_tokenizer_creates_sentencepiece_files(trained_sentencepiece_tokenizer):
+    assert (trained_sentencepiece_tokenizer / "spm.model").is_file()
+    assert (trained_sentencepiece_tokenizer / "spm.vocab").is_file()
+
+
+def test_train_bpe_tokenizer_is_deterministic(tmp_path, sample_text_file):
     path1 = tmp_path / "tokenizer1"
     path2 = tmp_path / "tokenizer2"
-
-    train_tokenizer(sample_text_file, path1, vocab_size=1000)
-    train_tokenizer(sample_text_file, path2, vocab_size=1000)
+    train_tokenizer(sample_text_file, path1, tokenizer_type="bpe", vocab_size=300)
+    train_tokenizer(sample_text_file, path2, tokenizer_type="bpe", vocab_size=300)
 
     vocab1 = (path1 / "vocab.json").read_text(encoding="utf-8")
     vocab2 = (path2 / "vocab.json").read_text(encoding="utf-8")
@@ -69,100 +72,126 @@ def test_train_tokenizer_is_deterministic(tmp_path, sample_text_file):
     assert merges1 == merges2
 
 
-def test_hash_tokenizer_config_returns_hashes(trained_tokenizer):
-    """Hashing should return expected keys."""
-    hashes = hash_tokenizer_config(trained_tokenizer)
+def test_bpe_deterministic_contract(trained_bpe_tokenizer):
+    tokenizer = create_tokenizer("bpe", vocab_size=300, min_frequency=2)
+    report = verify_deterministic_contract(
+        tokenizer,
+        trained_bpe_tokenizer,
+        "determinism check for bpe backend",
+    )
+    assert report.all_passed, report.to_dict()
 
+
+def test_sentencepiece_deterministic_contract(trained_sentencepiece_tokenizer):
+    tokenizer = create_tokenizer("sentencepiece", vocab_size=128, min_frequency=2)
+    report = verify_deterministic_contract(
+        tokenizer,
+        trained_sentencepiece_tokenizer,
+        "determinism check for sentencepiece backend",
+    )
+    assert report.all_passed, report.to_dict()
+
+
+def test_hash_tokenizer_config_returns_backend_aware_fields(trained_bpe_tokenizer):
+    hashes = hash_tokenizer_config(trained_bpe_tokenizer, tokenizer_type="bpe")
+
+    assert hashes["tokenizer_backend"] == "bpe"
+    assert "tokenizer_manifest_hash" in hashes
     assert "tokenizer_vocab_hash" in hashes
     assert "tokenizer_merges_hash" in hashes
-    assert "tokenizer_vocab_size" in hashes
+    assert "tokenizer_backend_metadata" in hashes
+    assert "tokenizer_artifact_hashes" in hashes
+    assert hashes["tokenizer_vocab_size"] > 0
 
 
-def test_hash_changes_when_vocab_changes(trained_tokenizer):
-    """Modifying vocab.json should change its hash."""
-    hashes_before = hash_tokenizer_config(trained_tokenizer)
+def test_hash_tokenizer_config_sentencepiece_contains_model_hash(trained_sentencepiece_tokenizer):
+    hashes = hash_tokenizer_config(trained_sentencepiece_tokenizer, tokenizer_type="sentencepiece")
 
-    vocab_path = trained_tokenizer / "vocab.json"
+    assert hashes["tokenizer_backend"] == "sentencepiece"
+    assert "tokenizer_manifest_hash" in hashes
+    assert "tokenizer_model_hash" in hashes
+    assert "tokenizer_vocab_hash" in hashes
+    assert "tokenizer_merges_hash" not in hashes
+
+
+def test_hash_changes_when_bpe_vocab_changes(trained_bpe_tokenizer):
+    before = hash_tokenizer_config(trained_bpe_tokenizer, tokenizer_type="bpe")
+
+    vocab_path = trained_bpe_tokenizer / "vocab.json"
     vocab = json.loads(vocab_path.read_text(encoding="utf-8"))
-
     vocab["new_test_token"] = 99999
     vocab_path.write_text(json.dumps(vocab), encoding="utf-8")
 
-    hashes_after = hash_tokenizer_config(trained_tokenizer)
+    after = hash_tokenizer_config(trained_bpe_tokenizer, tokenizer_type="bpe")
+    assert before["tokenizer_manifest_hash"] != after["tokenizer_manifest_hash"]
+    assert before["tokenizer_vocab_hash"] != after["tokenizer_vocab_hash"]
 
-    assert hashes_before["tokenizer_vocab_hash"] != hashes_after["tokenizer_vocab_hash"]
 
+def test_hash_changes_when_bpe_merges_change(trained_bpe_tokenizer):
+    before = hash_tokenizer_config(trained_bpe_tokenizer, tokenizer_type="bpe")
 
-def test_hash_changes_when_merges_change(trained_tokenizer):
-    """Modifying merges.txt should change its hash."""
-    hashes_before = hash_tokenizer_config(trained_tokenizer)
-
-    merges_path = trained_tokenizer / "merges.txt"
+    merges_path = trained_bpe_tokenizer / "merges.txt"
     original = merges_path.read_text(encoding="utf-8")
-
     merges_path.write_text(original + "\nxx yy", encoding="utf-8")
 
-    hashes_after = hash_tokenizer_config(trained_tokenizer)
-
-    assert hashes_before["tokenizer_merges_hash"] != hashes_after["tokenizer_merges_hash"]
-
-
-def test_vocab_size_matches_actual(trained_tokenizer):
-    """Reported vocab size should match actual vocab.json length."""
-    hashes = hash_tokenizer_config(trained_tokenizer)
-
-    vocab_path = trained_tokenizer / "vocab.json"
-    actual_size = len(json.loads(vocab_path.read_text(encoding="utf-8")))
-
-    assert hashes["tokenizer_vocab_size"] == actual_size
+    after = hash_tokenizer_config(trained_bpe_tokenizer, tokenizer_type="bpe")
+    assert before["tokenizer_manifest_hash"] != after["tokenizer_manifest_hash"]
+    assert before["tokenizer_merges_hash"] != after["tokenizer_merges_hash"]
 
 
-# ---------------------------------------------------------------------
-# Negative Tests (API Hardening)
-# ---------------------------------------------------------------------
+def test_compute_tokenizer_manifest_is_stable(trained_bpe_tokenizer):
+    tokenizer = create_tokenizer("bpe", vocab_size=300, min_frequency=2)
+    m1 = compute_tokenizer_manifest(tokenizer, trained_bpe_tokenizer)
+    m2 = compute_tokenizer_manifest(tokenizer, trained_bpe_tokenizer)
+    assert m1["tokenizer_manifest_hash"] == m2["tokenizer_manifest_hash"]
+    assert m1["backend_metadata"]["backend"] == "bpe"
+
+
+def test_backend_hash_parity_reports_success(
+    trained_bpe_tokenizer, trained_sentencepiece_tokenizer
+):
+    bpe_manifest = compute_tokenizer_manifest(
+        create_tokenizer("bpe", vocab_size=300, min_frequency=2),
+        trained_bpe_tokenizer,
+    )
+    sp_manifest = compute_tokenizer_manifest(
+        create_tokenizer("sentencepiece", vocab_size=128, min_frequency=2),
+        trained_sentencepiece_tokenizer,
+    )
+    report = verify_backend_hash_parity(bpe_manifest, sp_manifest)
+    assert report.all_passed, report.to_dict()
+
+
+def test_bpe_load_fails_when_merges_missing(tmp_path):
+    tokenizer_path = tmp_path / "tok"
+    tokenizer_path.mkdir()
+    (tokenizer_path / "vocab.json").write_text("{}", encoding="utf-8")
+
+    tokenizer = create_tokenizer("bpe", vocab_size=128, min_frequency=2)
+    with pytest.raises(FileNotFoundError):
+        tokenizer.load(tokenizer_path)
+
+
+def test_sentencepiece_load_fails_when_model_missing(tmp_path):
+    tokenizer_path = tmp_path / "tok"
+    tokenizer_path.mkdir()
+    (tokenizer_path / "spm.vocab").write_text("dummy", encoding="utf-8")
+
+    tokenizer = create_tokenizer("sentencepiece", vocab_size=128, min_frequency=2)
+    with pytest.raises(FileNotFoundError):
+        tokenizer.load(tokenizer_path)
 
 
 def test_train_tokenizer_invalid_vocab_size(sample_text_file, tmp_path):
     with pytest.raises(ValueError, match="vocab_size must be > 0"):
-        train_tokenizer(
-            sample_text_file,
-            tmp_path / "tok",
-            vocab_size=0,
-        )
+        train_tokenizer(sample_text_file, tmp_path / "tok", vocab_size=0)
 
 
 def test_train_tokenizer_invalid_min_frequency(sample_text_file, tmp_path):
     with pytest.raises(ValueError, match="min_frequency must be > 0"):
-        train_tokenizer(
-            sample_text_file,
-            tmp_path / "tok",
-            min_frequency=0,
-        )
+        train_tokenizer(sample_text_file, tmp_path / "tok", min_frequency=0)
 
 
 def test_train_tokenizer_missing_file(tmp_path):
     with pytest.raises(FileNotFoundError):
-        train_tokenizer(
-            tmp_path / "does_not_exist.txt",
-            tmp_path / "tok",
-        )
-
-
-def test_hash_tokenizer_missing_vocab(tmp_path):
-    tokenizer_path = tmp_path / "tok"
-    tokenizer_path.mkdir()
-
-    (tokenizer_path / "merges.txt").write_text("dummy", encoding="utf-8")
-
-    with pytest.raises(FileNotFoundError):
-        hash_tokenizer_config(tokenizer_path)
-
-
-def test_hash_tokenizer_missing_merges(tmp_path):
-    tokenizer_path = tmp_path / "tok"
-    tokenizer_path.mkdir()
-
-    (tokenizer_path / "vocab.json").write_text("{}", encoding="utf-8")
-
-    with pytest.raises(FileNotFoundError):
-        hash_tokenizer_config(tokenizer_path)
+        train_tokenizer(tmp_path / "does_not_exist.txt", tmp_path / "tok")

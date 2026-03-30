@@ -1,293 +1,113 @@
-<!-- Don't delete it -->
-<div name="readme-top"></div>
+# Auossie OpenVerifiableLLM Prototype
 
-<!-- Organization Logo -->
-<div align="center" style="display: flex; align-items: center; justify-content: center; gap: 16px;">
-  <img alt="AOSSIE" src="public/aossie-logo.svg" width="175">
-  <img src="public/todo-project-logo.svg" width="175" />
-</div>
+This repository is an MVP/prototype implementation of the GSoC-26 proposal:
+**OpenVerifiableLLM — Deterministic Training Lineage and Policy-Governed Evaluation Verification**.
 
-&nbsp;
+It extends the baseline project with three proposal-aligned components:
 
-<!-- Organization Name -->
-<div align="center">
+- **Component A (Core)**: Tokenizer trust-chain completion (deterministic `encode/decode/load`, backend-aware hash parity, report-aligned checks).
+- **Component B (Core)**: Training lineage MVP (canonical training config hash, deterministic tensor-level checkpoint hashing, RNG provenance, parent-linked step receipts, chain verifier).
+- **Component C (Target)**: Evaluation verification layer (strict identity prechecks, policy-sealed tolerance calibration, fail-closed ordering).
 
-[![Static Badge](https://img.shields.io/badge/aossie.org/TODO-228B22?style=for-the-badge&labelColor=FFC517)](https://TODO.aossie.org/)
+## Scope Boundaries
 
-<!-- Correct deployed url to be added -->
+- No cross-hardware universal bitwise reproducibility claim.
+- Artifact integrity checks are strict hash checks (no tolerance).
+- Tolerance only applies to metric checks **after** identity checks pass.
 
-</div>
+## Prototype Architecture
 
-<!-- Organization/Project Social Handles -->
-<p align="center">
-<!-- Telegram -->
-<a href="https://t.me/StabilityNexus">
-<img src="https://img.shields.io/badge/Telegram-black?style=flat&logo=telegram&logoColor=white&logoSize=auto&color=24A1DE" alt="Telegram Badge"/></a>
-&nbsp;&nbsp;
-<!-- X (formerly Twitter) -->
-<a href="https://x.com/aossie_org">
-<img src="https://img.shields.io/twitter/follow/aossie_org" alt="X (formerly Twitter) Badge"/></a>
-&nbsp;&nbsp;
-<!-- Discord -->
-<a href="https://discord.gg/hjUhu33uAn">
-<img src="https://img.shields.io/discord/1022871757289422898?style=flat&logo=discord&logoColor=white&logoSize=auto&label=Discord&labelColor=5865F2&color=57F287" alt="Discord Badge"/></a>
-&nbsp;&nbsp;
-<!-- Medium -->
-<a href="https://news.stability.nexus/">
-  <img src="https://img.shields.io/badge/Medium-black?style=flat&logo=medium&logoColor=black&logoSize=auto&color=white" alt="Medium Badge"></a>
-&nbsp;&nbsp;
-<!-- LinkedIn -->
-<a href="https://www.linkedin.com/company/aossie/">
-  <img src="https://img.shields.io/badge/LinkedIn-black?style=flat&logo=LinkedIn&logoColor=white&logoSize=auto&color=0A66C2" alt="LinkedIn Badge"></a>
-&nbsp;&nbsp;
-<!-- Youtube -->
-<a href="https://www.youtube.com/@StabilityNexus">
-  <img src="https://img.shields.io/youtube/channel/subscribers/UCZOG4YhFQdlGaLugr_e5BKw?style=flat&logo=youtube&logoColor=white&logoSize=auto&labelColor=FF0000&color=FF0000" alt="Youtube Badge"></a>
-</p>
+### Tokenizer Layer (`openverifiablellm/tokenizer`)
 
----
+- `base.py`: deterministic tokenizer interface.
+- `bpe_tokenizer.py`: deterministic BPE backend implementation.
+- `sentencepiece_tokenizer.py`: deterministic SentencePiece backend implementation.
+- `verify.py`: tokenizer manifests, deterministic contract checks, backend parity verification.
+- `train.py`: training + backend-aware tokenizer hash manifest API.
 
-<div align="center">
-<h1>TODO: Project Name</h1>
-</div>
+### Training Lineage Layer (`openverifiablellm/training`)
 
-[TODO](https://TODO.stability.nexus/) is a ... TODO: Project Description.
+- `config.py`: immutable `TrainingConfig` + canonical hash.
+- `checkpoint.py`: deterministic safetensors checkpoint save/load/hash.
+- `rng.py`: RNG capture/restore/hash utilities.
+- `receipt.py`: `StepReceipt`, parent-link hashing, chain verification and failure codes.
+- `hooks.py`: hook-style receipt emission during step execution.
 
----
+### Evaluation Verification Layer (`openverifiablellm/eval`)
 
-## 🚀 Features
+- `config.py`: `EvaluationConfig` identity model.
+- `report.py`: `EvaluationReport`.
+- `policy.py` + `calibrate.py`: N>=10 calibration + policy hash sealing.
+- `harness.py`: pairwise QA benchmark harness with pinned benchmark hash.
+- `verifier.py`: strict-before-bounded fail-closed verification.
 
-TODO: List your main features here:
+### Demo Pipeline
 
-- **Feature 1**: Description
-- **Feature 2**: Description
-- **Feature 3**: Description
-- **Feature 4**: Description
+- `openverifiablellm/pipeline/mvp_demo.py`: end-to-end tokenizer → training lineage → evaluation verification run.
 
----
+## Failure Taxonomy Implemented
 
-## 💻 Tech Stack
+- `FAIL_IDENTITY_CHECKPOINT`
+- `FAIL_IDENTITY_BENCHMARK`
+- `FAIL_IDENTITY_EVAL_CONFIG`
+- `FAIL_POLICY_INTEGRITY`
+- `FAIL_RECEIPT_CHAIN_MISSING`
+- `FAIL_RECEIPT_CHAIN_REORDERED`
+- `FAIL_RECEIPT_CHAIN_TAMPERED`
+- `FAIL_METRIC_BOUND`
 
-TODO: Update based on your project
+`FAIL_REPLAY_DIVERGENCE` is represented in adversarial tests by explicit divergence assertions on checkpoint identity and trajectory mismatch behavior.
 
-### Frontend
-- React / Next.js / Flutter / React Native
-- TypeScript
-- TailwindCSS
+## Test Coverage Added
 
-### Backend
-- Flask / FastAPI / Node.js / Supabase
-- Database: PostgreSQL / SQLite / MongoDB
+- `tests/test_tokenizer.py`
+- `tests/test_training.py`
+- `tests/test_eval.py`
+- `tests/test_falsifiability.py`
+- `tests/test_pipeline_demo.py`
 
-### AI/ML (if applicable)
-- LangChain / LangGraph / LlamaIndex
-- Google Gemini / OpenAI / Anthropic Claude
-- Vector Database: Weaviate / Pinecone / Chroma
-- RAG / Prompt Engineering / Agent Frameworks
+These are in addition to existing baseline tests.
 
-### Blockchain (if applicable)
-- Solidity / solana / cardano / ergo Smart Contracts
-- Hardhat / Truffle / foundry
-- Web3.js / Ethers.js / Wagmi
-- OpenZeppelin / alchemy / Infura
-
----
-
-## ✅ Project Checklist
-
-TODO: Complete applicable items based on your project type
-
-- [ ] **The protocol** (if applicable):
-   - [ ] has been described and formally specified in a paper.
-   - [ ] has had its main properties mathematically proven.
-   - [ ] has been formally verified.
-- [ ] **The smart contracts** (if applicable):
-   - [ ] were thoroughly reviewed by at least two knights of The Stable Order.
-   - [ ] were deployed to: [Add deployment details]
-- [ ] **The mobile app** (if applicable):
-   - [ ] has an _About_ page containing the Stability Nexus's logo and pointing to the social media accounts of the Stability Nexus.
-   - [ ] is available for download as a release in this repo.
-   - [ ] is available in the relevant app stores.
-- [ ] **The AI/ML components** (if applicable):
-   - [ ] LLM/model selection and configuration are documented.
-   - [ ] Prompts and system instructions are version-controlled.
-   - [ ] Content safety and moderation mechanisms are implemented.
-   - [ ] API keys and rate limits are properly managed.
-
----
-
-## 🔗 Repository Links
-
-TODO: Update with your repository structure
-
-1. [Main Repository](https://github.com/AOSSIE-Org/TODO)
-2. [Frontend](https://github.com/AOSSIE-Org/TODO/tree/main/frontend) (if separate)
-3. [Backend](https://github.com/AOSSIE-Org/TODO/tree/main/backend) (if separate)
-
----
-
-## 🏗️ Architecture Diagram
-
-TODO: Add your system architecture diagram here
-
-```
-[Architecture Diagram Placeholder]
-```
-
-You can create architecture diagrams using:
-- [Draw.io](https://draw.io)
-- [Excalidraw](https://excalidraw.com)
-- [Lucidchart](https://lucidchart.com)
-- [Mermaid](https://mermaid.js.org) (for code-based diagrams)
-
-Example structure to include:
-- Frontend components
-- Backend services
-- Database architecture
-- External APIs/services
-- Data flow between components
-
----
-
-## 🔄 User Flow
-
-TODO: Add user flow diagrams showing how users interact with your application
-
-```
-[User Flow Diagram Placeholder]
-```
-
-### Key User Journeys
-
-TODO: Document main user flows:
-
-1. **User Journey 1**: Description
-   - Step 1
-   - Step 2
-   - Step 3
-
-2. **User Journey 2**: Description
-   - Step 1
-   - Step 2
-   - Step 3
-
-3. **User Journey 3**: Description
-   - Step 1
-   - Step 2
-   - Step 3
-
----
-
-## �🍀 Getting Started
-
-### Prerequisites
-
-TODO: List what developers need installed
-
-- Node.js 18+ / Python 3.9+ / Flutter SDK
-- npm / yarn / pnpm
-- [Any specific tools or accounts needed]
-
-### Installation
-
-TODO: Provide detailed setup instructions
-
-#### 1. Clone the Repository
+## Quick Start
 
 ```bash
-git clone https://github.com/AOSSIE-Org/TODO.git
-cd TODO
+python -m pip install -e .
+python -m pytest -q
+python -m ruff check .
+python -m ruff format --check .
 ```
 
-#### 2. Install Dependencies
+## Run the MVP Demo
 
 ```bash
-npm install
-# or
-yarn install
-# or
-pnpm install
+python -c "from pathlib import Path; from openverifiablellm.pipeline import run_mvp_demo; print(run_mvp_demo(Path('.')))"
 ```
 
-#### 3. Configure Environment Variables(.env.example)
+Generated artifacts:
 
-Create a `.env` file in the root directory:
+- `artifacts/tokenizer/*`
+- `artifacts/training/*`
+- `artifacts/evaluation/*`
+- `artifacts/final_verdict.json`
 
-```env
-# Add your environment variables here
-API_KEY=your_api_key
-DATABASE_URL=your_database_url
+Example prototype run output:
+
+```json
+{
+  "tokenizer_all_passed": true,
+  "receipt_chain_passed": true,
+  "evaluation_verdict": "PASS",
+  "checkpoint_hash": "32e968f30a3631096b6106e04b312d1c8bca6d1a49b9e831fbf0b01f5ff044d1",
+  "benchmark_hash": "657c45798c7be501020bbe5087ac0bc426c86d733af4069496e3c714a62c3186",
+  "policy_hash": "26ddfabed3b5fa0947a51f3bdfab1df25fc35a5299b17f67d4a725a0329e2393"
+}
 ```
 
-#### 4. Run the Development Server
+Pairwise QA benchmark hash used in the MVP:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-```
+`657c45798c7be501020bbe5087ac0bc426c86d733af4069496e3c714a62c3186`
 
-#### 5. Open your Browser
+## Notes
 
-Navigate to [http://localhost:3000](http://localhost:3000) to see the application.
-
-For detailed setup instructions, please refer to our [Installation Guide](./docs/INSTALL_GUIDE.md) (if you have one).
-
----
-
-## 📱 App Screenshots
-
-TODO: Add screenshots showcasing your application
-
-|  |  |  |
-|---|---|---|
-| Screenshot 1 | Screenshot 2 | Screenshot 3 |
-
----
-# Developer Setup
-This project uses `uv` for dependency management.
-
-## Installation
-1. Install [uv](https://github.com/astral-sh/uv).
-2. Run `uv sync` to install dependencies and create a virtual environment.
-
-## Linting
-We use `ruff` to maintain code quality. 
-- Run checks: `uv run ruff check .`
-- Auto-fix issues: `uv run ruff check . --fix`
-
----
-
-## 🙌 Contributing
-
-⭐ Don't forget to star this repository if you find it useful! ⭐
-
-Thank you for considering contributing to this project! Contributions are highly appreciated and welcomed. To ensure smooth collaboration, please refer to our [Contribution Guidelines](./CONTRIBUTING.md).
-
----
-
-## ✨ Maintainers
-
-TODO: Add maintainer information
-
-- [Maintainer Name](https://github.com/username)
-- [Maintainer Name](https://github.com/username)
-
----
-
-## 📍 License
-
-This project is licensed under the GNU General Public License v3.0.
-See the [LICENSE](LICENSE) file for details.
-
----
-
-## 💪 Thanks To All Contributors
-
-Thanks a lot for spending your time helping TODO grow. Keep rocking 🥂
-
-[![Contributors](https://contrib.rocks/image?repo=AOSSIE-Org/TODO)](https://github.com/AOSSIE-Org/TODO/graphs/contributors)
-
-© 2025 AOSSIE 
+- Deterministic checkpoint identity uses tensor-level hashing over safetensors content, not `.pt` container hash.
+- Evaluation verification is intentionally fail-closed: identity failures short-circuit metric checks.

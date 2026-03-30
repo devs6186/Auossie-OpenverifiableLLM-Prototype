@@ -326,6 +326,7 @@ TSWLatexianTemp*
 #*Notes.bib
 
 data/
+artifacts/
 *.egg-info/
 __pycache__/
 *.pyc
