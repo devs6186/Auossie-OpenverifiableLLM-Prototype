@@ -314,7 +314,7 @@ def verify_preprocessing(
         # Check if manifest has chain awareness (parent_manifest_hash field)
         chain_report = verify_manifest_chain(manifest_path)
         if "parent_manifest_hash" in manifest:
-            status = CheckStatus.PASS if chain_report["chain_valid"] else CheckStatus.SKIP
+            status = CheckStatus.PASS if chain_report["chain_valid"] else CheckStatus.FAIL
             report.add(
                 CheckResult(
                     name="manifest_chain_awareness",
